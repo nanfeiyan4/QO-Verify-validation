@@ -50,6 +50,37 @@
   2. 内连接按「无序对」比较子节点（外连接仍严格保序）
   3. **根列序守卫**：比较前先要求两条查询的输出列名列表逐位相同，否则直接 `Unknown`
 
+### 2b. §3.2 / §3.3 的 `RelOptRule` 实现（`calcite/`）
+
+论文 §3 的三条规则，前两条已实现为**真正的 Calcite 变换规则**，不再是玩具层模拟：
+
+| 文件 | 规则 | 匹配 → 产出 |
+|---|---|---|
+| `PivotRule.java` | **§3.2** self-join of group-by ⇔ 条件聚合 | `Project-Filter-Join(Agg,Agg)` → `Project-Filter-Aggregate(MAX(CASE),SUM(CASE))` |
+| `ScalarAggLojRule.java` | **§3.3** 被蕴含标量聚合子查询 ⇔ LOJ 上的标量聚合 | `Join(Agg_promo, Agg_total)` → `Aggregate(SUM(CASE))(Project)(LeftOuterJoin)` |
+
+验证方式：把规则注册进 `VolcanoPlanner`，看 QO-Verify 的结论是否从 `Unknown` 翻成 `True`：
+
+```
+§3.2 Query4(self-join) vs Query5(条件聚合)     规则不在: Unknown   规则在: True
+§3.3 Query6(两个标量子查询) vs Query7(LOJ)        规则不在: Unknown   规则在: True
+```
+
+#### 实现过程中撞到的四个真实问题（都已记录在代码注释里）
+
+1. **规则描述字符串有格式校验**：`"PivotRule(§3.2 … => …)"` 会被 Calcite 直接拒绝，必须写成 `"PivotRule(project)"` 这种形式。
+2. **深层 operand 在已建好的 memo 里匹配不到**：`operand(Project, operand(Filter, operand(Join, …)))` 在规则竞争后往往匹配失败，因为子节点已是 `RelSubset`。最后改成匹配顶层节点 + 在子集合里查找所需节点（`find()`）。
+3. **`transformTo` 要求行类型（含可空性）完全一致**：
+   ```
+   Type mismatch: $f1: INTEGER -> INTEGER NOT NULL
+   ```
+   规则产出的 `MAX(CASE …)` 是可空的，而 LHS 的列是 `NOT NULL`（join 保证了行存在）。
+   **这暴露了一个有意思的局限：Calcite 的类型系统无法表达"join 保证行存在"，所以规则必须显式 `CAST(... AS <LHS 类型>)` 做类型断言**；相应地，检查端的归一化也要能剥掉这种"只改可空性、不改值"的 CAST。
+4. **规则之间会互相破坏形状**：我们自己注册的 `FILTER_INTO_JOIN` 会把 `Filter` 折进 join 条件，于是 §3.2 要匹配的 `Filter over Join` 形状消失了。
+   实测确认后，§3.2 那组改用不含 `FILTER_INTO_JOIN` 的规则集。
+   —— 这是"**规则集相互作用影响覆盖率**"的一个具体例证，和论文 §2.2 的说法一致。
+5. （附带）**聚合别名不能进签名**：`s2000=[MAX($1)]` 与 `agg#0=[MAX($1)]` 曾被子结构签名判为不同，导致漏证；已改成只比较聚合函数名 + 参数列表。
+
 ### 3. fuzz（`fuzz/`）
 
 SQLite（Python 内置），零依赖。
@@ -145,6 +176,15 @@ memo Q1 : 6 个 group, 11 个表达式, 隐含 8 棵完整逻辑表达式
 
 ---
 
+### G. §3.2 / §3.3 作为 `RelOptRule`（端到端）
+
+| 目标 | 规则未注册 | **注册规则后** |
+|---|---|---|
+| §3.2 self-join of group-by ⇔ 条件聚合 | Unknown | **True** |
+| §3.3 被蕴含标量子查询 ⇔ LOJ 上的标量聚合 | Unknown | **True** |
+
+（算法一行未改，只往 `VolcanoPlanner` 里加了一条变换规则。）
+
 ## 顺带发现的两处论文示例瑕疵
 
 1. **Query 3 缺了 `Filter(C1 IS NOT NULL)`**
@@ -219,7 +259,12 @@ bash scripts/run_all.sh
 ├── calcite/
 │   ├── pom.xml
 │   ├── settings.xml              # 阿里云 Maven 镜像
-│   └── src/main/java/demo/qoverify/QoVerifyDemo.java
+│   └── src/main/java/demo/qoverify/
+│       ├── QoVerifyDemo.java      # 主实验：10 个场景 + 归一化 + 规则消融
+│       ├── PivotRule.java         # §3.2 的 RelOptRule
+│       ├── ScalarAggLojRule.java  # §3.3 的 RelOptRule
+│       ├── RuleDemo.java          # 加/不加规则的对照
+│       └── DumpPlan.java          # 打印 SQL 转出的逻辑计划（写规则前先用它看形状）
 ├── fuzz/
 │   ├── fuzz_qoverify.py          # soundness（随机库造反例）
 │   └── fuzz_rules.py             # §3.2/§3.3 前提条件
@@ -233,7 +278,7 @@ bash scripts/run_all.sh
 
 ## 局限与未完成
 
-1. **§3.2 / §3.3 尚未实现为 Calcite 的 `RelOptRule`**：目前是玩具层模拟 + SQL 层等价性验证；要做到端到端，需要给 Calcite 加两个自定义规则。
+1. **§3.2 / §3.3 的 `RelOptRule` 是针对特定计划形状写的**（operand 精确到 `Project-Aggregate-Filter-Join-Scan`），已能端到端跑通，但泛化到任意查询形状还需要放宽 operand 与匹配逻辑。
 2. **归一化中「内连接按无序对比较」**把比较放宽到「内部列序可置换」，靠根列序守卫兜住。若要更严格的判定，需要在每一步都跟踪列置换。
 3. **外连接仍严格保序**，因此涉及 LOJ 重排的等价对（§3.3 那类）目前还证不出。
 4. **5 组真实企业库不可得**，用 TPC-H/TPC-DS/JOB 或自建小库替代，因此与论文的绝对数值不可比。

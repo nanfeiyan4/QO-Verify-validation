@@ -243,7 +243,15 @@ public class QoVerifyDemo {
             for (int i = 0; i < a.getGroupCount(); i++) {
                 gs.add(absCol(a.getInput(), a.getGroupSet().nth(i)));
             }
-            return "AGG:groups=" + gs + ":calls=" + a.getAggCallList();
+            // 签名里不能带聚合的别名（s2000 vs agg#0 应视为同一个表达式）
+            StringBuilder sb = new StringBuilder("AGG:groups=" + gs + ":calls=");
+            for (org.apache.calcite.rel.core.AggregateCall ac : a.getAggCallList()) {
+                sb.append(ac.getAggregation().getName())
+                  .append(ac.getArgList())
+                  .append(ac.isDistinct() ? "D" : "")
+                  .append(";");
+            }
+            return sb.toString();
         }
         if (n instanceof Project) {
             Project p = (Project) n;
@@ -271,7 +279,12 @@ public class QoVerifyDemo {
             Project p = (Project) r;
             boolean pure = true;
             for (RexNode e : p.getProjects()) {
-                if (!(e instanceof RexInputRef)) {
+                // 纯列置换：直接引用，或对引用的 CAST（只为对齐可空性，值不变）
+                RexNode x = e;
+                while (x instanceof RexCall && x.getKind() == SqlKind.CAST) {
+                    x = ((RexCall) x).getOperands().get(0);
+                }
+                if (!(x instanceof RexInputRef)) {
                     pure = false;
                     break;
                 }
