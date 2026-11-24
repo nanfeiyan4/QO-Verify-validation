@@ -162,6 +162,22 @@ public class RuleDemo {
             + "   ON s.promo_i = promo.pk_i WHERE promo.ch = 'Y') a, "
             + "(SELECT SUM(price_i) AS total FROM s) b";
 
+    /** §3.1 的 LHS：两个分组子查询的 join */
+    static final String Q2_SQL = ""
+            + "SELECT d2.p2, d2.s2, d1.q1, d2.q2 FROM "
+            + "(SELECT l_partkey_i AS p1, SUM(l_quantity_i) AS q1 "
+            + "   FROM lineitem GROUP BY l_partkey_i) d1, "
+            + "(SELECT l_partkey_i AS p2, l_suppkey_i AS s2, SUM(l_quantity_i) AS q2 "
+            + "   FROM lineitem GROUP BY l_partkey_i, l_suppkey_i) d2 "
+            + "WHERE d1.p1 = d2.p2";
+
+    /** §3.1 的 RHS：窗口函数 + DISTINCT */
+    static final String Q3_SQL = ""
+            + "SELECT DISTINCT l_partkey_i AS p2, l_suppkey_i AS s2, "
+            + "SUM(l_quantity_i) OVER (PARTITION BY l_partkey_i) AS q1, "
+            + "SUM(l_quantity_i) OVER (PARTITION BY l_partkey_i, l_suppkey_i) AS q2 "
+            + "FROM lineitem";
+
     static final String Q7_SQL = ""
             + "SELECT SUM(CASE WHEN p.pk_i IS NOT NULL THEN s.price_i END) AS promo_sales, "
             + "       SUM(s.price_i) AS total "
@@ -192,6 +208,7 @@ public class RuleDemo {
         addTable("sales", new String[]{"cust", "yr_i", "amt_i"});
         addTable("s", new String[]{"promo_i", "price_i"});
         addTable("promo", new String[]{"pk_i", "ch"});
+        addTable("lineitem", new String[]{"l_partkey_i", "l_suppkey_i", "l_quantity_i"});
 
         System.out.println();
         System.out.println("§3.2 / §3.3 的 RelOptRule 实现验证");
@@ -200,6 +217,8 @@ public class RuleDemo {
         RelMaker q4 = (c, cat) -> parse(Q4_SQL, c);
         RelMaker q5 = (c, cat) -> parse(Q5_SQL, c);
         RelMaker q6 = (c, cat) -> parse(Q6_SQL, c);
+        RelMaker q2 = (c, cat) -> parse(Q2_SQL, c);
+        RelMaker q3 = (c, cat) -> parse(Q3_SQL, c);
         RelMaker q7 = (c, cat) -> parse(Q7_SQL, c);
 
         // §3.2 需要 Filter 仍然在 join 之上，因此这一组不注册 FILTER_INTO_JOIN
@@ -208,6 +227,9 @@ public class RuleDemo {
                 baseRules(false));
         run("§3.3 Query6(两个标量子查询) vs Query7(LOJ)", q6, q7, ScalarAggLojRule.INSTANCE,
                 baseRules(true));
+        // §3.1 同样需要 Filter 仍在 join 之上
+        run("§3.1 Query2(分组子查询 join) vs Query3(窗口函数)", q2, q3,
+                JoinToWindowRule.INSTANCE, baseRules(false));
 
         System.out.println("================================================================");
         System.out.println("说明：'规则不在' 时 Unknown 是因为证明链断在缺失的变换规则上；");

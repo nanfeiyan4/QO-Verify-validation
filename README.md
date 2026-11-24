@@ -58,13 +58,31 @@
 |---|---|---|
 | `PivotRule.java` | **§3.2** self-join of group-by ⇔ 条件聚合 | `Project-Filter-Join(Agg,Agg)` → `Project-Filter-Aggregate(MAX(CASE),SUM(CASE))` |
 | `ScalarAggLojRule.java` | **§3.3** 被蕴含标量聚合子查询 ⇔ LOJ 上的标量聚合 | `Join(Agg_promo, Agg_total)` → `Aggregate(SUM(CASE))(Project)(LeftOuterJoin)` |
+| `JoinToWindowRule.java` | **§3.1** 分组子查询 join ⇔ 窗口函数 | `Project-Filter-Join(Agg_C1, Agg_C)` → `Aggregate(DISTINCT)(Project(RexOver…))` ⚠️ **已实现但尚未收敛**（见 §3.1 说明） |
 
 验证方式：把规则注册进 `VolcanoPlanner`，看 QO-Verify 的结论是否从 `Unknown` 翻成 `True`：
 
 ```
 §3.2 Query4(self-join) vs Query5(条件聚合)     规则不在: Unknown   规则在: True
 §3.3 Query6(两个标量子查询) vs Query7(LOJ)        规则不在: Unknown   规则在: True
+§3.1 Query2(分组子查询 join) vs Query3(窗口函数)   规则不在: Unknown   规则在: Unknown  ← 未收敛
 ```
+
+#### §3.1 的特殊困难（未收敛的原因）
+
+Calcite 把窗口函数**保留为 `Project` 里的 `RexOver`**（而不是 `LogicalWindow`），所以 RHS 的构造路径是清楚的：
+`RexBuilder.makeOver(...)` 造两个 `SUM(...) OVER (PARTITION BY …)`，再用一个 `Aggregate(group=全部输出列)` 表达 `DISTINCT`。
+`JoinToWindowRule.java` 里这段构造代码已经写完。
+
+**卡住的是匹配侧**，而且两种策略都试过了：
+
+| 策略 | 结果 |
+|---|---|
+| 运行时在 memo 里搜索所需子结构（`find()`） | 规则能触发，但 `VolcanoPlanner` 把子节点包成含多备选的 `RelSubset`、memo 本身是**含环的图**，定位不稳定（已加 visited 集合 + 深度上限兜住死循环） |
+| 精确 operand 把形状钉死（`Project-Filter-Join-Agg-Project-Agg-Project-Scan`） | 在 §3.2/§3.3 上有效的这招，在这里**根本没有命中** |
+
+因此 §3.1 的查询对目前仍是 `Unknown → Unknown`。要收敛，大概需要给 QO-Verify 单独导出一份
+"按形状索引"的 memo 视图，或在规则里引入更稳健的形状匹配（而不是靠 operand 或运行时搜索）。
 
 #### 实现过程中撞到的四个真实问题（都已记录在代码注释里）
 
@@ -279,6 +297,7 @@ bash scripts/run_all.sh
 ## 局限与未完成
 
 1. **§3.2 / §3.3 的 `RelOptRule` 是针对特定计划形状写的**（operand 精确到 `Project-Aggregate-Filter-Join-Scan`），已能端到端跑通，但泛化到任意查询形状还需要放宽 operand 与匹配逻辑。
+2. **§3.1 的规则尚未收敛**：RHS 能正确构造，但运行期在 memo 里定位子结构不稳定（见上文）。这是"用运行时搜索代替 operand 匹配"的直接后果。
 2. **归一化中「内连接按无序对比较」**把比较放宽到「内部列序可置换」，靠根列序守卫兜住。若要更严格的判定，需要在每一步都跟踪列置换。
 3. **外连接仍严格保序**，因此涉及 LOJ 重排的等价对（§3.3 那类）目前还证不出。
 4. **5 组真实企业库不可得**，用 TPC-H/TPC-DS/JOB 或自建小库替代，因此与论文的绝对数值不可比。

@@ -4,16 +4,16 @@
 
 场景                                 笨办法        QO-Verify   group   expr  memo(ms) match(ms)
 --------------------------------------------------------------------------------------------
-S1 同一查询的两种写法                       Unknown    True            5      8      1262        24
-S2 join 换序（交换律）                    Unknown    True            7     13        50         0
-S3 三表换序（交换+结合）                     Unknown    True           20     53       254         2
-S4 合取项顺序不同                         True       True            8     14        46         0
-S5 非等价（谓词常量不同）                     Unknown    Unknown         8     14        47        12
-S6 非等价（换了连接列）                      Unknown    Unknown        20     53       223        97
-S8 谓词下推（Filter 在 join 上 vs 在输入侧）   Unknown    True            8     14        36         0
-S7 聚合 + 子查询投影                      Unknown    True            2      2       177         0
+S1 同一查询的两种写法                       Unknown    True            5      8      1139        35
+S2 join 换序（交换律）                    Unknown    True            7     13        51         1
+S3 三表换序（交换+结合）                     Unknown    True           20     53       483         4
+S4 合取项顺序不同                         True       True            8     14        46         1
+S5 非等价（谓词常量不同）                     Unknown    Unknown         8     14        45        20
+S6 非等价（换了连接列）                      Unknown    Unknown        20     53       161        44
+S8 谓词下推（Filter 在 join 上 vs 在输入侧）   Unknown    True            8     14        30         0
+S7 聚合 + 子查询投影                      Unknown    True            2      2       229         0
 S10 输出列序不同（归一化的反向对照）               Unknown    Unknown         0      0         0         0
-S9 非等价（CASE 的 ELSE 0 vs ELSE NULL） Unknown    Unknown         5      5         6         0
+S9 非等价（CASE 的 ELSE 0 vs ELSE NULL） Unknown    Unknown         5      5        10         0
 --------------------------------------------------------------------------------
 True 命中 6 / 10 对；误报（非等价却被判 True）= 0
 （memo 生成时间与 match 时间的对比，即论文“成本大头在 memo 生成”的结构性复现）
@@ -25,16 +25,16 @@ True 命中 6 / 10 对；误报（非等价却被判 True）= 0
 
 场景                                 笨办法        QO-Verify   group   expr  memo(ms) match(ms)
 --------------------------------------------------------------------------------------------
-S1 同一查询的两种写法                       Unknown    True            4      4      1218        22
-S2 join 换序（交换律）                    Unknown    True            5      6        21         1
-S3 三表换序（交换+结合）                     Unknown    Unknown         8     10        26         2
-S4 合取项顺序不同                         True       True            6      7        12         0
-S5 非等价（谓词常量不同）                     Unknown    Unknown         6      7        12         0
-S6 非等价（换了连接列）                      Unknown    Unknown         8     10        15         1
-S8 谓词下推（Filter 在 join 上 vs 在输入侧）   Unknown    True            6      7        20         0
-S7 聚合 + 子查询投影                      Unknown    True            2      2       223         0
+S1 同一查询的两种写法                       Unknown    True            4      4      1272        20
+S2 join 换序（交换律）                    Unknown    True            5      6        16         1
+S3 三表换序（交换+结合）                     Unknown    Unknown         8     10        29         2
+S4 合取项顺序不同                         True       True            6      7        28         0
+S5 非等价（谓词常量不同）                     Unknown    Unknown         6      7        28         1
+S6 非等价（换了连接列）                      Unknown    Unknown         8     10        31         2
+S8 谓词下推（Filter 在 join 上 vs 在输入侧）   Unknown    True            6      7        25         2
+S7 聚合 + 子查询投影                      Unknown    True            2      2       166         0
 S10 输出列序不同（归一化的反向对照）               Unknown    Unknown         0      0         0         0
-S9 非等价（CASE 的 ELSE 0 vs ELSE NULL） Unknown    Unknown         5      5        11         0
+S9 非等价（CASE 的 ELSE 0 vs ELSE NULL） Unknown    Unknown         5      5         9         0
 --------------------------------------------------------------------------------
 True 命中 5 / 10 对；误报（非等价却被判 True）= 0
 （memo 生成时间与 match 时间的对比，即论文“成本大头在 memo 生成”的结构性复现）
@@ -46,6 +46,7 @@ True 命中 5 / 10 对；误报（非等价却被判 True）= 0
 ================================================================
   §3.2 Query4(self-join) vs Query5(条件聚合)         规则不在: Unknown   规则在: True    
   §3.3 Query6(两个标量子查询) vs Query7(LOJ)            规则不在: Unknown   规则在: True    
+  §3.1 Query2(分组子查询 join) vs Query3(窗口函数)        规则不在: Unknown   规则在: Unknown 
 ================================================================
 说明：'规则不在' 时 Unknown 是因为证明链断在缺失的变换规则上；
       把规则加进 VolcanoPlanner 后，memo 里就出现了与另一侧同构的表达式，
