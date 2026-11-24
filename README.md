@@ -1,5 +1,7 @@
 # QO-Verify 机制验证
 
+> 仓库：<https://github.com/nanfeiyan4/QO-Verify-validation>
+
 对 CIDR 2026 论文 **《Leveraging Query Optimizers to Verify the Soundness of LLM-based Query Rewrites for Real-World Workloads, and More!》**（Narasayya & Chaudhuri, Microsoft）的**独立复现**。
 
 > 本仓库复现的是**机制**（方法是否可行、结论是否成立），**不追求数值一致**。论文的 4 个企业库为微软私有数据、SQL Server 的 memo 导出为微软内部改动，因此覆盖率 37%、开销 1.2 s 这类数字不可移植；可复现的是「规则集决定覆盖率」这一机制。
